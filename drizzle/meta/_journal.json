@@ -1,0 +1,20 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1786884364632,
+      "tag": "0000_majestic_shadow_king",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1786884425959,
+      "tag": "0001_whole_xorn",
+      "breakpoints": true
+    }
+  ]
+}

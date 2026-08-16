@@ -1,0 +1,254 @@
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+import {
+  AlertTriangle,
+  ArrowRight,
+  Bell,
+  Check,
+  CheckCircle2,
+  ChevronDown,
+  ClipboardCheck,
+  Clock3,
+  Coffee,
+  FileText,
+  HandCoins,
+  LayoutDashboard,
+  Minus,
+  PackageCheck,
+  Plane,
+  Plus,
+  Search,
+  ShieldCheck,
+  Sparkles,
+  Users,
+  X,
+} from "lucide-react";
+
+type Item = {
+  id: number;
+  category: string;
+  name: string;
+  location: string;
+  required: number;
+  loaded: number;
+  unit: string;
+  checked: boolean;
+};
+
+const initialItems: Item[] = [
+  { id: 1, category: "Catering", name: "Hot meal trays", location: "FWD galley", required: 126, loaded: 126, unit: "trays", checked: true },
+  { id: 2, category: "Catering", name: "Water bottles", location: "FWD + AFT", required: 192, loaded: 184, unit: "bottles", checked: false },
+  { id: 3, category: "Cabin comfort", name: "Blankets", location: "Bins 1–4", required: 48, loaded: 48, unit: "pieces", checked: true },
+  { id: 4, category: "Cabin comfort", name: "Pillows", location: "Bins 1–4", required: 36, loaded: 36, unit: "pieces", checked: true },
+  { id: 5, category: "Cabin service", name: "Tea & coffee kits", location: "FWD galley", required: 8, loaded: 8, unit: "kits", checked: true },
+  { id: 6, category: "Cabin service", name: "Waste bags", location: "AFT galley", required: 20, loaded: 20, unit: "pieces", checked: false },
+  { id: 7, category: "Special requests", name: "Infant meal", location: "FWD chiller", required: 2, loaded: 2, unit: "meals", checked: true },
+  { id: 8, category: "Special requests", name: "Wheelchair tags", location: "Door 1L kit", required: 3, loaded: 3, unit: "tags", checked: true },
+];
+
+const categoryMeta: Record<string, { icon: typeof Coffee; tone: string }> = {
+  Catering: { icon: Coffee, tone: "blue" },
+  "Cabin comfort": { icon: Sparkles, tone: "indigo" },
+  "Cabin service": { icon: PackageCheck, tone: "teal" },
+  "Special requests": { icon: HandCoins, tone: "amber" },
+};
+
+export default function Home() {
+  const [items, setItems] = useState<Item[]>(initialItems);
+  const [filter, setFilter] = useState<"all" | "pending" | "shortage">("all");
+  const [handoverOpen, setHandoverOpen] = useState(false);
+  const [notes, setNotes] = useState("Water bottles short by 8. Catering team notified at Gate 4.");
+  const [toast, setToast] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [activeNav, setActiveNav] = useState("Turnaround");
+
+  useEffect(() => {
+    fetch("/api/operations")
+      .then((response) => response.ok ? response.json() : null)
+      .then((data) => data?.items?.length && setItems(data.items))
+      .catch(() => undefined);
+  }, []);
+
+  const checked = items.filter((item) => item.checked).length;
+  const shortages = items.filter((item) => item.loaded < item.required).length;
+  const progress = Math.round((checked / items.length) * 100);
+  const filteredItems = items.filter((item) => {
+    if (filter === "pending") return !item.checked;
+    if (filter === "shortage") return item.loaded < item.required;
+    return true;
+  });
+
+  const groups = useMemo(() => {
+    return Object.keys(categoryMeta).map((category) => {
+      const group = items.filter((item) => item.category === category);
+      return { category, done: group.filter((item) => item.checked).length, total: group.length };
+    });
+  }, [items]);
+
+  async function updateItem(id: number, changes: Partial<Item>) {
+    setItems((current) => current.map((item) => item.id === id ? { ...item, ...changes } : item));
+    try {
+      await fetch("/api/operations", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ id, ...changes }),
+      });
+    } catch {
+      // The optimistic state keeps the demo usable if the preview database is waking up.
+    }
+  }
+
+  async function sendHandover() {
+    setSaving(true);
+    try {
+      await fetch("/api/operations", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ notes, toCrew: "Ayesha Malik", toFlightNo: "PA207", toRoute: "KHI → DXB" }),
+      });
+    } finally {
+      setSaving(false);
+      setHandoverOpen(false);
+      setToast("Handover sent to Ayesha Malik · PA207");
+      window.setTimeout(() => setToast(""), 4200);
+    }
+  }
+
+  return (
+    <div className="app-shell">
+      <aside className="sidebar">
+        <div className="brand"><span className="brand-mark">a</span><span>air<span>blue</span></span></div>
+        <div className="product-label">CREW OPERATIONS</div>
+        <nav aria-label="Primary navigation">
+          {[
+            ["Overview", LayoutDashboard],
+            ["Turnaround", ClipboardCheck],
+            ["Flights", Plane],
+            ["Handovers", ArrowRight],
+            ["Reports", FileText],
+          ].map(([label, Icon]) => (
+            <button key={label as string} className={activeNav === label ? "nav-item active" : "nav-item"} onClick={() => setActiveNav(label as string)}>
+              <Icon size={19} /><span>{label as string}</span>{label === "Turnaround" && <b>3</b>}
+            </button>
+          ))}
+        </nav>
+        <div className="sidebar-spacer" />
+        <div className="support-card">
+          <div className="support-icon"><ShieldCheck size={19} /></div>
+          <p>Need operational support?</p>
+          <span>Contact OCC · Ext. 240</span>
+        </div>
+        <div className="crew-profile">
+          <div className="avatar">SK</div>
+          <div><strong>Sara Khan</strong><span>Cabin Supervisor</span></div>
+          <ChevronDown size={16} />
+        </div>
+      </aside>
+
+      <main>
+        <header className="topbar">
+          <div className="mobile-brand"><span className="brand-mark">a</span> airblue</div>
+          <div className="search"><Search size={18} /><input aria-label="Search flights or supplies" placeholder="Search flights, items or crew" /><kbd>⌘ K</kbd></div>
+          <div className="top-actions"><button aria-label="Notifications" className="icon-button"><Bell size={19} /><i /></button><span className="station"><b>ISB</b> Islamabad Station</span></div>
+        </header>
+
+        <div className="workspace">
+          <section className="flight-banner">
+            <div className="flight-primary">
+              <div className="eyebrow"><span className="live-dot" /> TURNAROUND IN PROGRESS</div>
+              <div className="route-row">
+                <div><h1>PA201</h1><p>Islamabad <ArrowRight size={15} /> Karachi</p></div>
+                <div className="aircraft-chip"><Plane size={18} /><span>Airbus A321<br /><b>AP-BMS</b></span></div>
+              </div>
+            </div>
+            <div className="flight-stats">
+              <div><span>DEPARTURE</span><strong>11:20</strong><small><Clock3 size={13} /> 42 min remaining</small></div>
+              <div><span>GATE</span><strong>04</strong><small>Boarding 10:45</small></div>
+              <div><span>LOAD</span><strong>181</strong><small><Users size={13} /> 94% capacity</small></div>
+            </div>
+            <div className="readiness">
+              <div className="progress-ring" style={{ "--progress": `${progress * 3.6}deg` } as React.CSSProperties}><span>{progress}%</span></div>
+              <div><span>FLIGHT READINESS</span><strong>{progress === 100 ? "Ready to board" : "Final checks"}</strong><small>{checked} of {items.length} items verified</small></div>
+            </div>
+          </section>
+
+          <div className="section-heading">
+            <div><span className="crumb">Turnaround / PA201</span><h2>Pre-flight requisites</h2><p>Verify service items and cabin readiness before passenger boarding.</p></div>
+            <div className="heading-actions"><button className="ghost-button"><FileText size={17} /> Export log</button><button className="primary-button" onClick={() => setHandoverOpen(true)}><ArrowRight size={17} /> Start handover</button></div>
+          </div>
+
+          <section className="category-grid">
+            {groups.map(({ category, done, total }) => {
+              const meta = categoryMeta[category];
+              const Icon = meta.icon;
+              const complete = done === total;
+              return <article key={category} className={`category-card ${complete ? "complete" : ""}`}>
+                <div className={`category-icon ${meta.tone}`}><Icon size={20} /></div>
+                <div className="category-copy"><span>{category}</span><strong>{done}/{total} verified</strong><div className="mini-progress"><i style={{ width: `${(done / total) * 100}%` }} /></div></div>
+                {complete ? <CheckCircle2 className="complete-check" size={20} /> : <span className="pending-count">{total - done}</span>}
+              </article>;
+            })}
+          </section>
+
+          <section className="inventory-panel">
+            <div className="panel-toolbar">
+              <div className="segmented" role="tablist" aria-label="Inventory filters">
+                <button className={filter === "all" ? "selected" : ""} onClick={() => setFilter("all")}>All items <span>{items.length}</span></button>
+                <button className={filter === "pending" ? "selected" : ""} onClick={() => setFilter("pending")}>Needs check <span>{items.length - checked}</span></button>
+                <button className={filter === "shortage" ? "selected" : ""} onClick={() => setFilter("shortage")}>Shortages <span className={shortages ? "alert" : ""}>{shortages}</span></button>
+              </div>
+              <div className="sync-status"><CheckCircle2 size={15} /> Saved just now</div>
+            </div>
+
+            <div className="table-wrap">
+              <table>
+                <thead><tr><th>Item</th><th>Stowage</th><th>Required</th><th>Loaded</th><th>Variance</th><th>Status</th></tr></thead>
+                <tbody>
+                  {filteredItems.map((item) => {
+                    const variance = item.loaded - item.required;
+                    return <tr key={item.id} className={item.checked ? "row-checked" : ""}>
+                      <td><div className="item-name"><button className={item.checked ? "check-box checked" : "check-box"} aria-label={`Mark ${item.name} verified`} onClick={() => updateItem(item.id, { checked: !item.checked })}>{item.checked && <Check size={14} />}</button><div><strong>{item.name}</strong><span>{item.category}</span></div></div></td>
+                      <td><span className="location-pill">{item.location}</span></td>
+                      <td><strong className="quantity">{item.required}</strong><span className="unit">{item.unit}</span></td>
+                      <td><div className="stepper"><button aria-label={`Decrease ${item.name}`} onClick={() => updateItem(item.id, { loaded: Math.max(0, item.loaded - 1), checked: false })}><Minus size={14} /></button><strong>{item.loaded}</strong><button aria-label={`Increase ${item.name}`} onClick={() => updateItem(item.id, { loaded: item.loaded + 1, checked: false })}><Plus size={14} /></button></div></td>
+                      <td>{variance < 0 ? <span className="variance shortage">{variance}</span> : <span className="variance okay">{variance > 0 ? `+${variance}` : "0"}</span>}</td>
+                      <td>{item.checked ? <span className="status-pill verified"><CheckCircle2 size={14} /> Verified</span> : variance < 0 ? <span className="status-pill issue"><AlertTriangle size={14} /> Short</span> : <button className="verify-button" onClick={() => updateItem(item.id, { checked: true })}>Verify</button>}</td>
+                    </tr>;
+                  })}
+                </tbody>
+              </table>
+              {filteredItems.length === 0 && <div className="empty-state"><CheckCircle2 size={28} /><strong>Nothing to review here</strong><span>All items in this view are accounted for.</span></div>}
+            </div>
+            <div className="panel-footer"><span><AlertTriangle size={15} /> {shortages} shortage requires attention before handover.</span><strong>{checked}/{items.length} checks completed</strong></div>
+          </section>
+
+          <section className="handover-strip">
+            <div className="next-flight-icon"><Plane size={22} /></div>
+            <div><span>NEXT ASSIGNMENT</span><strong>PA207 · Karachi to Dubai</strong><small>13:55 departure · Ayesha Malik, incoming supervisor</small></div>
+            <div className="handover-state"><div className="avatar small">AM</div><span><b>Handover not started</b><small>Due by 11:05</small></span></div>
+            <button onClick={() => setHandoverOpen(true)}>Prepare handover <ArrowRight size={16} /></button>
+          </section>
+        </div>
+      </main>
+
+      {handoverOpen && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.currentTarget === event.target && setHandoverOpen(false)}>
+        <section className="modal" role="dialog" aria-modal="true" aria-labelledby="handover-title">
+          <div className="modal-header"><div><span className="modal-kicker">SHIFT CONTINUITY</span><h2 id="handover-title">Prepare flight handover</h2></div><button className="icon-button" aria-label="Close handover" onClick={() => setHandoverOpen(false)}><X size={20} /></button></div>
+          <div className="handover-route"><div><span>FROM</span><strong>PA201</strong><small>ISB → KHI</small></div><ArrowRight size={22} /><div><span>NEXT FLIGHT</span><strong>PA207</strong><small>KHI → DXB</small></div></div>
+          <div className="recipient"><div className="avatar">AM</div><div><span>HAND OVER TO</span><strong>Ayesha Malik</strong><small>Cabin Supervisor · Karachi Station</small></div><span className="online">On duty</span></div>
+          <div className="handover-summary">
+            <div><CheckCircle2 size={17} /><span><strong>{checked}/{items.length}</strong> requisites verified</span></div>
+            <div className={shortages ? "warn" : ""}><AlertTriangle size={17} /><span><strong>{shortages}</strong> open shortage</span></div>
+            <div><Clock3 size={17} /><span>Snapshot at <strong>10:38</strong></span></div>
+          </div>
+          <label className="notes-label">Operational notes <span>Required for open issues</span><textarea value={notes} onChange={(event) => setNotes(event.target.value)} rows={4} /></label>
+          <label className="confirmation"><input type="checkbox" defaultChecked /><span>I confirm this handover reflects the latest cabin and catering status.</span></label>
+          <div className="modal-actions"><button className="ghost-button" onClick={() => setHandoverOpen(false)}>Save draft</button><button className="primary-button" onClick={sendHandover} disabled={saving}>{saving ? "Sending…" : "Send & notify incoming crew"} <ArrowRight size={17} /></button></div>
+        </section>
+      </div>}
+
+      {toast && <div className="toast"><CheckCircle2 size={19} /><span><strong>Handover complete</strong>{toast}</span></div>}
+    </div>
+  );
+}
