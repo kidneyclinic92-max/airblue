@@ -7,7 +7,6 @@ import {
   Bell,
   Check,
   CheckCircle2,
-  ChevronDown,
   ClipboardCheck,
   Clock3,
   Coffee,
@@ -23,7 +22,9 @@ import {
   Sparkles,
   Users,
   X,
+  ShieldAlert,
 } from "lucide-react";
+import { AuthGate, CrewProfile } from "./components/AuthGate";
 
 type Item = {
   id: number;
@@ -61,7 +62,6 @@ export default function Home() {
   const [notes, setNotes] = useState("Water bottles short by 8. Catering team notified at Gate 4.");
   const [toast, setToast] = useState("");
   const [saving, setSaving] = useState(false);
-  const [activeNav, setActiveNav] = useState("Turnaround");
 
   useEffect(() => {
     fetch("/api/operations")
@@ -115,22 +115,41 @@ export default function Home() {
     }
   }
 
+  async function saveDraft() {
+    await fetch("/api/operations", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ notes, toCrew: "Ayesha Malik", toFlightNo: "PA207", toRoute: "KHI → DXB", status: "draft" }) });
+    setHandoverOpen(false);
+    setToast("Draft saved for PA207");
+    window.setTimeout(() => setToast(""), 3500);
+  }
+
+  function exportLog() {
+    const rows = [["Item", "Category", "Location", "Required", "Loaded", "Status"], ...items.map((item) => [item.name, item.category, item.location, String(item.required), String(item.loaded), item.checked ? "Verified" : "Pending"])];
+    const blob = new Blob([rows.map((row) => row.map((cell) => `"${cell}"`).join(",")).join("\n")], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = "PA201-turnaround-log.csv";
+    anchor.click();
+    URL.revokeObjectURL(url);
+  }
+
   return (
-    <div className="app-shell">
+    <AuthGate><div className="app-shell">
       <aside className="sidebar">
         <div className="brand"><span className="brand-mark">a</span><span>air<span>blue</span></span></div>
         <div className="product-label">CREW OPERATIONS</div>
         <nav aria-label="Primary navigation">
           {[
-            ["Overview", LayoutDashboard],
-            ["Turnaround", ClipboardCheck],
-            ["Flights", Plane],
-            ["Handovers", ArrowRight],
-            ["Reports", FileText],
-          ].map(([label, Icon]) => (
-            <button key={label as string} className={activeNav === label ? "nav-item active" : "nav-item"} onClick={() => setActiveNav(label as string)}>
+            ["Overview", "/overview", LayoutDashboard],
+            ["Turnaround", "/", ClipboardCheck],
+            ["Flights", "/flights", Plane],
+            ["Handovers", "/handovers", ArrowRight],
+            ["Cabin Defects", "/defects", ShieldAlert],
+            ["Reports", "/reports", FileText],
+          ].map(([label, href, Icon]) => (
+            <a key={href as string} href={href as string} className={label === "Turnaround" ? "nav-item active" : "nav-item"}>
               <Icon size={19} /><span>{label as string}</span>{label === "Turnaround" && <b>3</b>}
-            </button>
+            </a>
           ))}
         </nav>
         <div className="sidebar-spacer" />
@@ -139,11 +158,7 @@ export default function Home() {
           <p>Need operational support?</p>
           <span>Contact OCC · Ext. 240</span>
         </div>
-        <div className="crew-profile">
-          <div className="avatar">SK</div>
-          <div><strong>Sara Khan</strong><span>Cabin Supervisor</span></div>
-          <ChevronDown size={16} />
-        </div>
+        <CrewProfile />
       </aside>
 
       <main>
@@ -175,7 +190,7 @@ export default function Home() {
 
           <div className="section-heading">
             <div><span className="crumb">Turnaround / PA201</span><h2>Pre-flight requisites</h2><p>Verify service items and cabin readiness before passenger boarding.</p></div>
-            <div className="heading-actions"><button className="ghost-button"><FileText size={17} /> Export log</button><button className="primary-button" onClick={() => setHandoverOpen(true)}><ArrowRight size={17} /> Start handover</button></div>
+            <div className="heading-actions"><a className="ghost-button" href="/defects?new=1"><ShieldAlert size={17} /> Report defect</a><button className="ghost-button" onClick={exportLog}><FileText size={17} /> Export log</button><button className="primary-button" onClick={() => setHandoverOpen(true)}><ArrowRight size={17} /> Start handover</button></div>
           </div>
 
           <section className="category-grid">
@@ -244,11 +259,11 @@ export default function Home() {
           </div>
           <label className="notes-label">Operational notes <span>Required for open issues</span><textarea value={notes} onChange={(event) => setNotes(event.target.value)} rows={4} /></label>
           <label className="confirmation"><input type="checkbox" defaultChecked /><span>I confirm this handover reflects the latest cabin and catering status.</span></label>
-          <div className="modal-actions"><button className="ghost-button" onClick={() => setHandoverOpen(false)}>Save draft</button><button className="primary-button" onClick={sendHandover} disabled={saving}>{saving ? "Sending…" : "Send & notify incoming crew"} <ArrowRight size={17} /></button></div>
+          <div className="modal-actions"><button className="ghost-button" onClick={saveDraft}>Save draft</button><button className="primary-button" onClick={sendHandover} disabled={saving}>{saving ? "Sending…" : "Send & notify incoming crew"} <ArrowRight size={17} /></button></div>
         </section>
       </div>}
 
       {toast && <div className="toast"><CheckCircle2 size={19} /><span><strong>Handover complete</strong>{toast}</span></div>}
-    </div>
+    </div></AuthGate>
   );
 }

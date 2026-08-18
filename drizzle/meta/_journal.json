@@ -15,6 +15,27 @@
       "when": 1786884425959,
       "tag": "0001_whole_xorn",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1786885132781,
+      "tag": "0002_sharp_wildside",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1786885886713,
+      "tag": "0003_rich_amphibian",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1786943999209,
+      "tag": "0004_minor_abomination",
+      "breakpoints": true
     }
   ]
 }
