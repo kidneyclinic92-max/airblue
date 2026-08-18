@@ -1,7 +1,4 @@
-import { env } from "cloudflare:workers";
-import { desc, eq } from "drizzle-orm";
-import { getDb } from "../../../db";
-import { flights, handovers, inventoryItems } from "../../../db/schema";
+import { getDatabase } from "../../../db";
 import { getCrewUser, unauthorized } from "../../../db/auth";
 
 const seedItems = [
@@ -21,7 +18,7 @@ const seedFlights = [
 ] as const;
 
 export async function ensureDatabase() {
-  const d1 = env.DB;
+  const d1 = getDatabase();
   await d1.batch([
     d1.prepare(`CREATE TABLE IF NOT EXISTS inventory_items (id INTEGER PRIMARY KEY AUTOINCREMENT, flight_id TEXT NOT NULL, category TEXT NOT NULL, name TEXT NOT NULL, location TEXT NOT NULL, required_count INTEGER NOT NULL, loaded_count INTEGER NOT NULL, unit TEXT NOT NULL, checked INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
     d1.prepare(`CREATE TABLE IF NOT EXISTS handovers (id INTEGER PRIMARY KEY AUTOINCREMENT, from_flight_id TEXT NOT NULL, to_flight_no TEXT NOT NULL, to_route TEXT NOT NULL, to_crew TEXT NOT NULL, notes TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'sent', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
@@ -48,42 +45,45 @@ export async function ensureDatabase() {
 export async function GET(request: Request) {
   if (!await getCrewUser(request)) return unauthorized();
   await ensureDatabase();
-  const db = getDb();
+  const database = getDatabase();
   const [items, allFlights, recentHandovers] = await Promise.all([
-    db.select().from(inventoryItems).where(eq(inventoryItems.flightId, "PA201")).orderBy(inventoryItems.id),
-    db.select().from(flights).orderBy(flights.flightDate, flights.departure),
-    db.select().from(handovers).orderBy(desc(handovers.createdAt)).limit(50),
+    database.prepare("SELECT id, flight_id AS flightId, category, name, location, required_count AS required, loaded_count AS loaded, unit, checked, updated_at AS updatedAt FROM inventory_items WHERE flight_id = ? ORDER BY id").bind("PA201").all(),
+    database.prepare("SELECT flight_no AS flightNo, flight_date AS flightDate, origin, destination, departure, aircraft, registration, gate, passengers, status, readiness, supervisor, updated_at AS updatedAt FROM flights ORDER BY flight_date, departure").all(),
+    database.prepare("SELECT id, from_flight_id AS fromFlightId, to_flight_no AS toFlightNo, to_route AS toRoute, to_crew AS toCrew, notes, status, created_at AS createdAt FROM handovers ORDER BY created_at DESC LIMIT 50").all(),
   ]);
-  return Response.json({ items, flights: allFlights, recentHandovers });
+  return Response.json({ items: items.results, flights: allFlights.results, recentHandovers: recentHandovers.results });
 }
 
 export async function PATCH(request: Request) {
   if (!await getCrewUser(request)) return unauthorized();
   await ensureDatabase();
   const body = await request.json() as Record<string, unknown>;
-  const db = getDb();
+  const database = getDatabase();
   if (body.entity === "flight") {
     const flightNo = String(body.flightNo ?? "");
     if (!flightNo) return Response.json({ error: "Flight number is required" }, { status: 400 });
-    const changes: Partial<typeof flights.$inferInsert> = { updatedAt: new Date().toISOString() };
-    if (typeof body.status === "string") changes.status = body.status;
-    if (typeof body.readiness === "number") changes.readiness = Math.max(0, Math.min(100, Math.round(body.readiness)));
-    if (typeof body.gate === "string") changes.gate = body.gate;
-    const [flight] = await db.update(flights).set(changes).where(eq(flights.flightNo, flightNo)).returning();
+    const fields = ["updated_at = ?"]; const values: Array<string | number> = [new Date().toISOString()];
+    if (typeof body.status === "string") { fields.push("status = ?"); values.push(body.status); }
+    if (typeof body.readiness === "number") { fields.push("readiness = ?"); values.push(Math.max(0, Math.min(100, Math.round(body.readiness)))); }
+    if (typeof body.gate === "string") { fields.push("gate = ?"); values.push(body.gate); }
+    await database.prepare(`UPDATE flights SET ${fields.join(", ")} WHERE flight_no = ?`).bind(...values, flightNo).run();
+    const flight = await database.prepare("SELECT flight_no AS flightNo, flight_date AS flightDate, origin, destination, departure, aircraft, registration, gate, passengers, status, readiness, supervisor, updated_at AS updatedAt FROM flights WHERE flight_no = ?").bind(flightNo).first();
     return Response.json({ flight });
   }
   if (body.entity === "handover") {
     const id = Number(body.id);
     if (!id) return Response.json({ error: "Handover id is required" }, { status: 400 });
-    const [handover] = await db.update(handovers).set({ status: String(body.status ?? "acknowledged") }).where(eq(handovers.id, id)).returning();
+    await database.prepare("UPDATE handovers SET status = ? WHERE id = ?").bind(String(body.status ?? "acknowledged"), id).run();
+    const handover = await database.prepare("SELECT id, from_flight_id AS fromFlightId, to_flight_no AS toFlightNo, to_route AS toRoute, to_crew AS toCrew, notes, status, created_at AS createdAt FROM handovers WHERE id = ?").bind(id).first();
     return Response.json({ handover });
   }
   const id = Number(body.id);
   if (!id) return Response.json({ error: "Item id is required" }, { status: 400 });
-  const changes: { loaded?: number; checked?: boolean; updatedAt: string } = { updatedAt: new Date().toISOString() };
-  if (typeof body.loaded === "number") changes.loaded = Math.max(0, Math.round(body.loaded));
-  if (typeof body.checked === "boolean") changes.checked = body.checked;
-  const [item] = await db.update(inventoryItems).set(changes).where(eq(inventoryItems.id, id)).returning();
+  const fields = ["updated_at = ?"]; const values: Array<string | number> = [new Date().toISOString()];
+  if (typeof body.loaded === "number") { fields.push("loaded_count = ?"); values.push(Math.max(0, Math.round(body.loaded))); }
+  if (typeof body.checked === "boolean") { fields.push("checked = ?"); values.push(body.checked ? 1 : 0); }
+  await database.prepare(`UPDATE inventory_items SET ${fields.join(", ")} WHERE id = ?`).bind(...values, id).run();
+  const item = await database.prepare("SELECT id, flight_id AS flightId, category, name, location, required_count AS required, loaded_count AS loaded, unit, checked, updated_at AS updatedAt FROM inventory_items WHERE id = ?").bind(id).first();
   return Response.json({ item });
 }
 
@@ -91,7 +91,7 @@ export async function POST(request: Request) {
   if (!await getCrewUser(request)) return unauthorized();
   await ensureDatabase();
   const body = await request.json() as Record<string, unknown>;
-  const db = getDb();
+  const database = getDatabase();
   if (body.action === "createFlight") {
     const flightNo = String(body.flightNo ?? "").trim().toUpperCase();
     if (!flightNo || !body.origin || !body.destination || !body.departure) return Response.json({ error: "Flight number, route and departure are required" }, { status: 400 });
@@ -99,11 +99,13 @@ export async function POST(request: Request) {
     const passengers = Math.max(0, Math.round(Number(body.passengers ?? 0)));
     const capacity = aircraft.toLowerCase().includes("a321") ? 207 : 180;
     if (passengers > capacity) return Response.json({ error: `${aircraft} supports a maximum of ${capacity} passengers.` }, { status: 400 });
-    const [flight] = await db.insert(flights).values({ flightNo, flightDate: String(body.flightDate ?? "2026-08-16"), origin: String(body.origin).toUpperCase(), destination: String(body.destination).toUpperCase(), departure: String(body.departure), aircraft, registration: String(body.registration ?? "TBA").toUpperCase(), gate: String(body.gate ?? "TBA"), passengers, status: "scheduled", readiness: 0, supervisor: String(body.supervisor ?? "Unassigned") }).returning();
+    await database.prepare("INSERT INTO flights (flight_no, flight_date, origin, destination, departure, aircraft, registration, gate, passengers, status, readiness, supervisor) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'scheduled', 0, ?)").bind(flightNo, String(body.flightDate ?? "2026-08-16"), String(body.origin).toUpperCase(), String(body.destination).toUpperCase(), String(body.departure), aircraft, String(body.registration ?? "TBA").toUpperCase(), String(body.gate ?? "TBA"), passengers, String(body.supervisor ?? "Unassigned")).run();
+    const flight = await database.prepare("SELECT flight_no AS flightNo, flight_date AS flightDate, origin, destination, departure, aircraft, registration, gate, passengers, status, readiness, supervisor, updated_at AS updatedAt FROM flights WHERE flight_no = ?").bind(flightNo).first();
     return Response.json({ flight }, { status: 201 });
   }
   if (!body.toCrew || !body.toFlightNo) return Response.json({ error: "Incoming crew and flight are required" }, { status: 400 });
   const requestedStatus = body.status === "draft" ? "draft" : "sent";
-  const [handover] = await db.insert(handovers).values({ fromFlightId: String(body.fromFlightId ?? "PA201"), toFlightNo: String(body.toFlightNo), toRoute: String(body.toRoute ?? ""), toCrew: String(body.toCrew), notes: String(body.notes ?? "").trim(), status: requestedStatus }).returning();
+  const result = await database.prepare("INSERT INTO handovers (from_flight_id, to_flight_no, to_route, to_crew, notes, status) VALUES (?, ?, ?, ?, ?, ?)").bind(String(body.fromFlightId ?? "PA201"), String(body.toFlightNo), String(body.toRoute ?? ""), String(body.toCrew), String(body.notes ?? "").trim(), requestedStatus).run();
+  const handover = await database.prepare("SELECT id, from_flight_id AS fromFlightId, to_flight_no AS toFlightNo, to_route AS toRoute, to_crew AS toCrew, notes, status, created_at AS createdAt FROM handovers WHERE id = ?").bind(result.meta.last_row_id).first();
   return Response.json({ handover }, { status: 201 });
 }

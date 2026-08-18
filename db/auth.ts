@@ -1,4 +1,4 @@
-import { env } from "cloudflare:workers";
+import { getDatabase } from ".";
 
 export type CrewUser = { id: number; fullName: string; employeeId: string; email: string; role: string; station: string };
 const COOKIE_NAME = "bluecrew_session";
@@ -16,7 +16,7 @@ export async function hashPassword(password: string, salt = randomHex(16), itera
 }
 
 export async function ensureAuthDatabase() {
-  const d1 = env.DB;
+  const d1 = getDatabase();
   await d1.batch([
     d1.prepare(`CREATE TABLE IF NOT EXISTS crew_users (id INTEGER PRIMARY KEY AUTOINCREMENT, full_name TEXT NOT NULL, employee_id TEXT NOT NULL, email TEXT NOT NULL, role TEXT NOT NULL, station TEXT NOT NULL DEFAULT 'ISB', password_hash TEXT NOT NULL, password_salt TEXT NOT NULL, password_iterations INTEGER NOT NULL DEFAULT 150000, status TEXT NOT NULL DEFAULT 'active', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
     d1.prepare(`CREATE TABLE IF NOT EXISTS crew_sessions (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, token_hash TEXT NOT NULL, expires_at TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
@@ -36,7 +36,7 @@ export async function ensureAuthDatabase() {
 
 export async function createSession(userId: number, request: Request) {
   const token = randomHex(32); const tokenHash = await sha256(token); const expires = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
-  await env.DB.prepare("INSERT INTO crew_sessions (user_id, token_hash, expires_at) VALUES (?, ?, ?)").bind(userId, tokenHash, expires.toISOString()).run();
+  await getDatabase().prepare("INSERT INTO crew_sessions (user_id, token_hash, expires_at) VALUES (?, ?, ?)").bind(userId, tokenHash, expires.toISOString()).run();
   const secure = new URL(request.url).protocol === "https:" ? "; Secure" : "";
   return `${COOKIE_NAME}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800${secure}`;
 }
@@ -50,12 +50,12 @@ export async function getCrewUser(request: Request): Promise<CrewUser | null> {
   await ensureAuthDatabase();
   const token = readCookie(request); if (!token) return null;
   const tokenHash = await sha256(token);
-  const row = await env.DB.prepare(`SELECT u.id, u.full_name AS fullName, u.employee_id AS employeeId, u.email, u.role, u.station FROM crew_sessions s JOIN crew_users u ON u.id = s.user_id WHERE s.token_hash = ? AND s.expires_at > ? AND u.status = 'active' LIMIT 1`).bind(tokenHash, new Date().toISOString()).first<CrewUser>();
+  const row = await getDatabase().prepare(`SELECT u.id, u.full_name AS fullName, u.employee_id AS employeeId, u.email, u.role, u.station FROM crew_sessions s JOIN crew_users u ON u.id = s.user_id WHERE s.token_hash = ? AND s.expires_at > ? AND u.status = 'active' LIMIT 1`).bind(tokenHash, new Date().toISOString()).first<CrewUser>();
   return row ?? null;
 }
 
 export async function destroySession(request: Request) {
-  const token = readCookie(request); if (token) await env.DB.prepare("DELETE FROM crew_sessions WHERE token_hash = ?").bind(await sha256(token)).run();
+  const token = readCookie(request); if (token) await getDatabase().prepare("DELETE FROM crew_sessions WHERE token_hash = ?").bind(await sha256(token)).run();
   return `${COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`;
 }
 

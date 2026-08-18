@@ -25,6 +25,7 @@ import {
   ShieldAlert,
 } from "lucide-react";
 import { AuthGate, CrewProfile } from "./components/AuthGate";
+import { MobileNav } from "./components/MobileNav";
 
 type Item = {
   id: number;
@@ -246,6 +247,8 @@ export default function Home() {
           </section>
         </div>
       </main>
+
+      <MobileNav active="Turnaround" />
 
       {handoverOpen && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.currentTarget === event.target && setHandoverOpen(false)}>
         <section className="modal" role="dialog" aria-modal="true" aria-labelledby="handover-title">

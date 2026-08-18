@@ -5,12 +5,10 @@ import test from "node:test";
 async function render(pathname = "/") {
   const workerUrl = new URL("../dist/server/index.js", import.meta.url);
   workerUrl.searchParams.set("test", `${process.pid}-${Date.now()}`);
-  const { default: worker } = await import(workerUrl.href);
-  return worker.fetch(
-    new Request(`http://localhost${pathname}`, { headers: { accept: "text/html" } }),
-    { ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) } },
-    { waitUntil() {}, passThroughOnException() {} },
-  );
+  const { default: server } = await import(workerUrl.href);
+  const request = new Request(`http://localhost${pathname}`, { headers: { accept: "text/html" } });
+  if (typeof server === "function") return server(request, { waitUntil() {}, passThroughOnException() {} });
+  return server.fetch(request, { ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) } }, { waitUntil() {}, passThroughOnException() {} });
 }
 
 test("server-renders the authenticated BlueCrew shell", async () => {
@@ -40,4 +38,21 @@ test("includes crew planning, department handovers and ACDL persistence", async 
   assert.match(defectApi, /safety hazard cannot be deferred under Minimum MEL/i);
   assert.match(overview, /Good morning, Sana/);
   assert.doesNotMatch(overview, /Good morning, Sara/);
+});
+
+test("ships mobile navigation and Azure App Service prerequisites", async () => {
+  const [mobileNav, styles, database, bicep, guide] = await Promise.all([
+    readFile(new URL("../app/components/MobileNav.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+    readFile(new URL("../db/index.ts", import.meta.url), "utf8"),
+    readFile(new URL("../azure/app-service.bicep", import.meta.url), "utf8"),
+    readFile(new URL("../AZURE_APP_SERVICE.md", import.meta.url), "utf8"),
+  ]);
+  assert.match(mobileNav, /mobile-bottom-nav/);
+  assert.match(styles, /safe-area-inset-bottom/);
+  assert.match(styles, /min-height:\s*44px/);
+  assert.match(database, /SQLITE_PATH/);
+  assert.match(bicep, /NODE\|24-lts/);
+  assert.match(bicep, /\/home\/data\/airblue\.sqlite/);
+  assert.match(guide, /Basic B1/);
 });

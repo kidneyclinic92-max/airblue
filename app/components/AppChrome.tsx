@@ -2,6 +2,7 @@
 
 import { ArrowRight, Bell, ClipboardCheck, FileText, LayoutDashboard, Plane, Search, ShieldAlert, ShieldCheck } from "lucide-react";
 import { AuthGate, CrewProfile } from "./AuthGate";
+import { MobileNav } from "./MobileNav";
 
 const nav = [
   ["Overview", "/overview", LayoutDashboard], ["Turnaround", "/", ClipboardCheck], ["Flights", "/flights", Plane], ["Handovers", "/handovers", ArrowRight], ["Cabin Defects", "/defects", ShieldAlert], ["Reports", "/reports", FileText],
@@ -19,8 +20,8 @@ export function AppChrome({ children, active }: { children: React.ReactNode; act
     </aside>
     <main>
       <header className="topbar"><div className="mobile-brand"><span className="brand-mark">a</span> airblue</div><div className="search"><Search size={18} /><input aria-label="Search operations" placeholder="Search flights, items or crew" /><kbd>⌘ K</kbd></div><div className="top-actions"><button aria-label="Notifications" className="icon-button"><Bell size={19} /><i /></button><span className="station"><b>ISB</b> Islamabad Station</span></div></header>
-      <div className="mobile-tabs">{nav.map(([label, href]) => <a key={href} href={href} className={active === label ? "active" : ""}>{label}</a>)}</div>
       {children}
+      <MobileNav active={active} />
     </main>
   </div></AuthGate>;
 }
