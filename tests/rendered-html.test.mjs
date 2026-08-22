@@ -61,7 +61,8 @@ test("ships mobile navigation and Azure App Service prerequisites", async () => 
   assert.match(packageJson, /node dist\/standalone\/server\.js/);
   assert.match(workflow, /npm ci/);
   assert.match(workflow, /npm run build/);
-  assert.match(workflow, /^\s+dist$/m);
+  assert.match(workflow, /cp -R dist\/standalone\/\. azure-package\//);
+  assert.match(workflow, /package: azure-package\.zip/);
   assert.match(nextConfig, /output:\s*"standalone"/);
 });
 

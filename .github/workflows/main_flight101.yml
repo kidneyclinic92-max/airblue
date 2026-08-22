@@ -31,15 +31,22 @@ jobs:
       - name: Build standalone server
         run: npm run build
 
+      - name: Package Azure deployment
+        shell: bash
+        run: |
+          mkdir azure-package
+          cp -R dist/standalone/. azure-package/
+          node -e "const fs=require('node:fs'); const path='azure-package/package.json'; const data=JSON.parse(fs.readFileSync(path,'utf8')); data.scripts={start:'node server.js'}; data.engines={node:'>=22.13 <25'}; fs.writeFileSync(path, JSON.stringify(data,null,2)+'\n')"
+          test -f azure-package/server.js
+          test -f azure-package/node_modules/vinext/package.json
+          cd azure-package
+          zip -q -r ../azure-package.zip .
+
       - name: Upload deployment artifact
         uses: actions/upload-artifact@v4
         with:
           name: node-app
-          path: |
-            dist
-            package.json
-            package-lock.json
-            public
+          path: azure-package.zip
 
   deploy:
     runs-on: ubuntu-latest
@@ -56,5 +63,5 @@ jobs:
         with:
           app-name: 'flight101'
           slot-name: 'Production'
-          package: .
+          package: azure-package.zip
           publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_C403975D4CF7412EAC9A9FFD6D6B98E3 }}
