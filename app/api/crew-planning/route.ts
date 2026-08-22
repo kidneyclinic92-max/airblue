@@ -1,4 +1,4 @@
-import { getCrewUser, unauthorized } from "../../../db/auth";
+import { forbidden, getCrewUser, isCateringRole, unauthorized } from "../../../db/auth";
 import { ensureDatabase } from "../operations/route";
 import { getDatabase } from "../../../db";
 
@@ -22,7 +22,7 @@ async function ensureCrewPlanning() {
 }
 
 export async function GET(request: Request) {
-  const user = await getCrewUser(request); if (!user) return unauthorized(); await ensureCrewPlanning();
+  const user = await getCrewUser(request); if (!user) return unauthorized(); if (isCateringRole(user.role)) return forbidden(); await ensureCrewPlanning();
   const database = getDatabase();
   const [plans, assignments, users] = await Promise.all([
     database.prepare("SELECT flight_no AS flightNo, base_cabin_crew AS baseCabinCrew, lead_crew AS leadCrew, additional_crew AS additionalCrew, double_crew AS doubleCrew, required_total AS requiredTotal, updated_by AS updatedBy, updated_at AS updatedAt FROM crew_plans").all(),
@@ -33,7 +33,7 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const user = await getCrewUser(request); if (!user) return unauthorized(); await ensureCrewPlanning(); const body = await request.json() as Record<string, unknown>;
+  const user = await getCrewUser(request); if (!user) return unauthorized(); if (isCateringRole(user.role)) return forbidden(); await ensureCrewPlanning(); const body = await request.json() as Record<string, unknown>;
   const database = getDatabase();
   if (body.action === "updatePlan") {
     const flightNo = String(body.flightNo ?? ""); const flight = await database.prepare("SELECT aircraft FROM flights WHERE flight_no = ?").bind(flightNo).first<{ aircraft: string }>();
@@ -52,5 +52,5 @@ export async function POST(request: Request) {
 }
 
 export async function DELETE(request: Request) {
-  const user = await getCrewUser(request); if (!user) return unauthorized(); await ensureCrewPlanning(); const id = Number(new URL(request.url).searchParams.get("id")); if (!id) return Response.json({ error: "Assignment id required" }, { status: 400 }); await getDatabase().prepare("DELETE FROM crew_assignments WHERE id = ?").bind(id).run(); return Response.json({ ok: true });
+  const user = await getCrewUser(request); if (!user) return unauthorized(); if (isCateringRole(user.role)) return forbidden(); await ensureCrewPlanning(); const id = Number(new URL(request.url).searchParams.get("id")); if (!id) return Response.json({ error: "Assignment id required" }, { status: 400 }); await getDatabase().prepare("DELETE FROM crew_assignments WHERE id = ?").bind(id).run(); return Response.json({ ok: true });
 }

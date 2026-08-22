@@ -17,7 +17,7 @@ test("server-renders the authenticated BlueCrew shell", async () => {
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
   const html = await response.text();
   assert.match(html, /<title>BlueCrew Ops · Airblue Crew Operations<\/title>/i);
-  assert.match(html, /Preparing crew workspace/);
+  assert.match(html, /Preparing operations workspace/);
   assert.doesNotMatch(html, /Your site is taking shape|Building your site/);
 });
 
@@ -55,4 +55,23 @@ test("ships mobile navigation and Azure App Service prerequisites", async () => 
   assert.match(bicep, /NODE\|24-lts/);
   assert.match(bicep, /\/home\/data\/airblue\.sqlite/);
   assert.match(guide, /Basic B1/);
+});
+
+test("supports separate catering preparation and cabin verification workflows", async () => {
+  const [schema, cateringApi, cateringDashboard, auth, operations] = await Promise.all([
+    readFile(new URL("../db/schema.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/catering/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/components/CateringDashboard.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../db/auth.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/operations/route.ts", import.meta.url), "utf8"),
+  ]);
+  for (const field of ["workflow_status", "prepared_by", "submitted_at", "crew_verified_by", "crew_verified_at"]) assert.match(schema, new RegExp(field));
+  assert.match(auth, /catering\.team@airblue\.com/);
+  assert.match(auth, /Catering Supervisor/);
+  assert.match(cateringApi, /Only catering team accounts/);
+  assert.match(cateringApi, /workflow_status = 'submitted'/);
+  assert.match(cateringDashboard, /Submit to cabin crew/);
+  assert.match(cateringDashboard, /AuthGate team="catering"/);
+  assert.match(operations, /Loaded quantities are managed by Catering/);
+  assert.match(operations, /Catering must submit this manifest before cabin verification/);
 });

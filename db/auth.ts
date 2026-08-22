@@ -31,6 +31,11 @@ export async function ensureAuthDatabase() {
     const password = await hashPassword("Crew@123");
     await d1.prepare("INSERT OR IGNORE INTO crew_users (full_name, employee_id, email, role, station, password_hash, password_salt, password_iterations) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").bind("Sana Khan", "AB-2047", "sana.khan@airblue.com", "Cabin Supervisor", "ISB", password.hash, password.salt, password.iterations).run();
   }
+  const cateringDemo = await d1.prepare("SELECT id FROM crew_users WHERE email = ?").bind("catering.team@airblue.com").first();
+  if (!cateringDemo) {
+    const password = await hashPassword("Catering@123");
+    await d1.prepare("INSERT OR IGNORE INTO crew_users (full_name, employee_id, email, role, station, password_hash, password_salt, password_iterations) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").bind("Ali Raza", "CT-1001", "catering.team@airblue.com", "Catering Supervisor", "ISB", password.hash, password.salt, password.iterations).run();
+  }
   await d1.prepare("DELETE FROM crew_sessions WHERE expires_at <= ?").bind(new Date().toISOString()).run();
 }
 
@@ -60,3 +65,5 @@ export async function destroySession(request: Request) {
 }
 
 export function unauthorized() { return Response.json({ error: "Authentication required" }, { status: 401 }); }
+export function isCateringRole(role: string) { return role.toLowerCase().includes("catering"); }
+export function forbidden(message = "You do not have access to this workspace") { return Response.json({ error: message }, { status: 403 }); }

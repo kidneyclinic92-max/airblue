@@ -13,10 +13,8 @@ import {
   FileText,
   HandCoins,
   LayoutDashboard,
-  Minus,
   PackageCheck,
   Plane,
-  Plus,
   Search,
   ShieldCheck,
   Sparkles,
@@ -36,6 +34,10 @@ type Item = {
   loaded: number;
   unit: string;
   checked: boolean;
+  workflowStatus?: "draft" | "submitted" | "verified";
+  preparedBy?: string;
+  submittedAt?: string | null;
+  crewVerifiedBy?: string;
 };
 
 const initialItems: Item[] = [
@@ -73,7 +75,8 @@ export default function Home() {
 
   const checked = items.filter((item) => item.checked).length;
   const shortages = items.filter((item) => item.loaded < item.required).length;
-  const progress = Math.round((checked / items.length) * 100);
+  const progress = items.length ? Math.round((checked / items.length) * 100) : 0;
+  const manifestStatus = items.some((item) => item.workflowStatus === "draft") ? "draft" : items.length > 0 && items.every((item) => item.workflowStatus === "verified") ? "verified" : "submitted";
   const filteredItems = items.filter((item) => {
     if (filter === "pending") return !item.checked;
     if (filter === "shortage") return item.loaded < item.required;
@@ -90,13 +93,15 @@ export default function Home() {
   async function updateItem(id: number, changes: Partial<Item>) {
     setItems((current) => current.map((item) => item.id === id ? { ...item, ...changes } : item));
     try {
-      await fetch("/api/operations", {
+      const response = await fetch("/api/operations", {
         method: "PATCH",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ id, ...changes }),
       });
+      if (!response.ok) { const data = await response.json(); throw new Error(data.error ?? "Unable to update item"); }
     } catch {
-      // The optimistic state keeps the demo usable if the preview database is waking up.
+      setToast("Verification could not be saved. Refresh and try again.");
+      fetch("/api/operations").then((response) => response.ok ? response.json() : null).then((data) => data?.items && setItems(data.items));
     }
   }
 
@@ -194,6 +199,8 @@ export default function Home() {
             <div className="heading-actions"><a className="ghost-button" href="/defects?new=1"><ShieldAlert size={17} /> Report defect</a><button className="ghost-button" onClick={exportLog}><FileText size={17} /> Export log</button><button className="primary-button" onClick={() => setHandoverOpen(true)}><ArrowRight size={17} /> Start handover</button></div>
           </div>
 
+          <section className={`crew-manifest-banner ${manifestStatus}`}><span>{manifestStatus === "verified" ? <CheckCircle2 /> : manifestStatus === "submitted" ? <PackageCheck /> : <Clock3 />}</span><div><small>CATERING MANIFEST</small><strong>{manifestStatus === "verified" ? "Cabin verification complete" : manifestStatus === "submitted" ? "Submitted and ready for cabin verification" : "Awaiting submission from catering"}</strong><p>{items[0]?.preparedBy ? `Prepared by ${items[0].preparedBy}${items[0].submittedAt ? ` · ${new Date(items[0].submittedAt).toLocaleString()}` : ""}` : "Loaded quantities will appear once Catering submits this flight."}</p></div></section>
+
           <section className="category-grid">
             {groups.map(({ category, done, total }) => {
               const meta = categoryMeta[category];
@@ -224,12 +231,12 @@ export default function Home() {
                   {filteredItems.map((item) => {
                     const variance = item.loaded - item.required;
                     return <tr key={item.id} className={item.checked ? "row-checked" : ""}>
-                      <td><div className="item-name"><button className={item.checked ? "check-box checked" : "check-box"} aria-label={`Mark ${item.name} verified`} onClick={() => updateItem(item.id, { checked: !item.checked })}>{item.checked && <Check size={14} />}</button><div><strong>{item.name}</strong><span>{item.category}</span></div></div></td>
+                      <td><div className="item-name"><button disabled={manifestStatus === "draft"} className={item.checked ? "check-box checked" : "check-box"} aria-label={`Mark ${item.name} verified`} onClick={() => updateItem(item.id, { checked: !item.checked })}>{item.checked && <Check size={14} />}</button><div><strong>{item.name}</strong><span>{item.category}</span></div></div></td>
                       <td><span className="location-pill">{item.location}</span></td>
                       <td><strong className="quantity">{item.required}</strong><span className="unit">{item.unit}</span></td>
-                      <td><div className="stepper"><button aria-label={`Decrease ${item.name}`} onClick={() => updateItem(item.id, { loaded: Math.max(0, item.loaded - 1), checked: false })}><Minus size={14} /></button><strong>{item.loaded}</strong><button aria-label={`Increase ${item.name}`} onClick={() => updateItem(item.id, { loaded: item.loaded + 1, checked: false })}><Plus size={14} /></button></div></td>
+                      <td><strong className="quantity catering-loaded">{item.loaded}</strong><span className="unit">{item.unit}</span></td>
                       <td>{variance < 0 ? <span className="variance shortage">{variance}</span> : <span className="variance okay">{variance > 0 ? `+${variance}` : "0"}</span>}</td>
-                      <td>{item.checked ? <span className="status-pill verified"><CheckCircle2 size={14} /> Verified</span> : variance < 0 ? <span className="status-pill issue"><AlertTriangle size={14} /> Short</span> : <button className="verify-button" onClick={() => updateItem(item.id, { checked: true })}>Verify</button>}</td>
+                      <td>{item.checked ? <span className="status-pill verified"><CheckCircle2 size={14} /> Verified</span> : manifestStatus === "draft" ? <span className="status-pill waiting"><Clock3 size={14} /> Awaiting catering</span> : <button className={variance < 0 ? "verify-button shortage-verify" : "verify-button"} onClick={() => updateItem(item.id, { checked: true })}>{variance < 0 ? "Verify shortage" : "Verify"}</button>}</td>
                     </tr>;
                   })}
                 </tbody>

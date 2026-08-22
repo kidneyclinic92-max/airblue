@@ -11,8 +11,14 @@ export const inventoryItems = sqliteTable("inventory_items", {
   loaded: integer("loaded_count").notNull(),
   unit: text("unit").notNull(),
   checked: integer("checked", { mode: "boolean" }).notNull().default(false),
+  workflowStatus: text("workflow_status").notNull().default("draft"),
+  preparedBy: text("prepared_by").notNull().default(""),
+  submittedAt: text("submitted_at"),
+  crewVerifiedBy: text("crew_verified_by").notNull().default(""),
+  crewVerifiedAt: text("crew_verified_at"),
+  cateringNotes: text("catering_notes").notNull().default(""),
   updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
-}, (table) => [index("idx_inventory_items_flight_id").on(table.flightId)]);
+}, (table) => [index("idx_inventory_items_flight_id").on(table.flightId), index("idx_inventory_items_flight_workflow").on(table.flightId, table.workflowStatus)]);
 
 export const handovers = sqliteTable("handovers", {
   id: integer("id").primaryKey({ autoIncrement: true }),

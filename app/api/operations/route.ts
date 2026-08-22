@@ -1,5 +1,5 @@
 import { getDatabase } from "../../../db";
-import { getCrewUser, unauthorized } from "../../../db/auth";
+import { forbidden, getCrewUser, isCateringRole, unauthorized } from "../../../db/auth";
 
 const seedItems = [
   ["Catering", "Hot meal trays", "FWD galley", 126, 126, "trays", 1], ["Catering", "Water bottles", "FWD + AFT", 192, 184, "bottles", 0],
@@ -20,7 +20,7 @@ const seedFlights = [
 export async function ensureDatabase() {
   const d1 = getDatabase();
   await d1.batch([
-    d1.prepare(`CREATE TABLE IF NOT EXISTS inventory_items (id INTEGER PRIMARY KEY AUTOINCREMENT, flight_id TEXT NOT NULL, category TEXT NOT NULL, name TEXT NOT NULL, location TEXT NOT NULL, required_count INTEGER NOT NULL, loaded_count INTEGER NOT NULL, unit TEXT NOT NULL, checked INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
+    d1.prepare(`CREATE TABLE IF NOT EXISTS inventory_items (id INTEGER PRIMARY KEY AUTOINCREMENT, flight_id TEXT NOT NULL, category TEXT NOT NULL, name TEXT NOT NULL, location TEXT NOT NULL, required_count INTEGER NOT NULL, loaded_count INTEGER NOT NULL, unit TEXT NOT NULL, checked INTEGER NOT NULL DEFAULT 0, workflow_status TEXT NOT NULL DEFAULT 'draft', prepared_by TEXT NOT NULL DEFAULT '', submitted_at TEXT, crew_verified_by TEXT NOT NULL DEFAULT '', crew_verified_at TEXT, catering_notes TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
     d1.prepare(`CREATE TABLE IF NOT EXISTS handovers (id INTEGER PRIMARY KEY AUTOINCREMENT, from_flight_id TEXT NOT NULL, to_flight_no TEXT NOT NULL, to_route TEXT NOT NULL, to_crew TEXT NOT NULL, notes TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'sent', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
     d1.prepare(`CREATE TABLE IF NOT EXISTS flights (flight_no TEXT PRIMARY KEY NOT NULL, flight_date TEXT NOT NULL, origin TEXT NOT NULL, destination TEXT NOT NULL, departure TEXT NOT NULL, aircraft TEXT NOT NULL, registration TEXT NOT NULL, gate TEXT NOT NULL, passengers INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'scheduled', readiness INTEGER NOT NULL DEFAULT 0, supervisor TEXT NOT NULL, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`),
     d1.prepare(`CREATE INDEX IF NOT EXISTS idx_inventory_items_flight_id ON inventory_items(flight_id)`),
@@ -30,8 +30,17 @@ export async function ensureDatabase() {
     d1.prepare(`UPDATE flights SET supervisor = 'Sana Khan' WHERE supervisor = 'Sara Khan'`),
     d1.prepare(`UPDATE handovers SET to_crew = 'Sana Khan' WHERE to_crew = 'Sara Khan'`),
   ]);
+  const columns = await d1.prepare("PRAGMA table_info(inventory_items)").all<{ name: string }>();
+  const existing = new Set(columns.results.map((column) => column.name));
+  const additions = [
+    ["workflow_status", "TEXT NOT NULL DEFAULT 'draft'"], ["prepared_by", "TEXT NOT NULL DEFAULT ''"], ["submitted_at", "TEXT"],
+    ["crew_verified_by", "TEXT NOT NULL DEFAULT ''"], ["crew_verified_at", "TEXT"], ["catering_notes", "TEXT NOT NULL DEFAULT ''"],
+  ] as const;
+  for (const [name, definition] of additions) if (!existing.has(name)) await d1.prepare(`ALTER TABLE inventory_items ADD COLUMN ${name} ${definition}`).run();
+  await d1.prepare("CREATE INDEX IF NOT EXISTS idx_inventory_items_flight_workflow ON inventory_items(flight_id, workflow_status)").run();
   const itemCount = await d1.prepare("SELECT COUNT(*) AS total FROM inventory_items WHERE flight_id = ?").bind("PA201").first<{ total: number }>();
-  if (!itemCount?.total) await d1.batch(seedItems.map((item, index) => d1.prepare("INSERT OR IGNORE INTO inventory_items (id, flight_id, category, name, location, required_count, loaded_count, unit, checked) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)").bind(index + 1, "PA201", ...item)));
+  if (!itemCount?.total) await d1.batch(seedItems.map((item, index) => d1.prepare("INSERT OR IGNORE INTO inventory_items (id, flight_id, category, name, location, required_count, loaded_count, unit, checked, workflow_status, prepared_by, submitted_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'submitted', 'Ali Raza', ?)").bind(index + 1, "PA201", ...item, "2026-08-16T09:52:00Z")));
+  await d1.prepare("UPDATE inventory_items SET workflow_status = 'submitted', prepared_by = 'Ali Raza', submitted_at = COALESCE(submitted_at, '2026-08-16T09:52:00Z') WHERE flight_id = 'PA201' AND workflow_status = 'draft'").run();
   const flightCount = await d1.prepare("SELECT COUNT(*) AS total FROM flights").first<{ total: number }>();
   if (!flightCount?.total) await d1.batch(seedFlights.map((flight) => d1.prepare("INSERT OR IGNORE INTO flights (flight_no, flight_date, origin, destination, departure, aircraft, registration, gate, passengers, status, readiness, supervisor) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").bind(...flight)));
   const handoverCount = await d1.prepare("SELECT COUNT(*) AS total FROM handovers").first<{ total: number }>();
@@ -43,11 +52,11 @@ export async function ensureDatabase() {
 }
 
 export async function GET(request: Request) {
-  if (!await getCrewUser(request)) return unauthorized();
+  const user = await getCrewUser(request); if (!user) return unauthorized(); if (isCateringRole(user.role)) return forbidden("Catering accounts use the catering workspace.");
   await ensureDatabase();
   const database = getDatabase();
   const [items, allFlights, recentHandovers] = await Promise.all([
-    database.prepare("SELECT id, flight_id AS flightId, category, name, location, required_count AS required, loaded_count AS loaded, unit, checked, updated_at AS updatedAt FROM inventory_items WHERE flight_id = ? ORDER BY id").bind("PA201").all(),
+    database.prepare("SELECT id, flight_id AS flightId, category, name, location, required_count AS required, loaded_count AS loaded, unit, checked, workflow_status AS workflowStatus, prepared_by AS preparedBy, submitted_at AS submittedAt, crew_verified_by AS crewVerifiedBy, crew_verified_at AS crewVerifiedAt, catering_notes AS cateringNotes, updated_at AS updatedAt FROM inventory_items WHERE flight_id = ? ORDER BY id").bind("PA201").all(),
     database.prepare("SELECT flight_no AS flightNo, flight_date AS flightDate, origin, destination, departure, aircraft, registration, gate, passengers, status, readiness, supervisor, updated_at AS updatedAt FROM flights ORDER BY flight_date, departure").all(),
     database.prepare("SELECT id, from_flight_id AS fromFlightId, to_flight_no AS toFlightNo, to_route AS toRoute, to_crew AS toCrew, notes, status, created_at AS createdAt FROM handovers ORDER BY created_at DESC LIMIT 50").all(),
   ]);
@@ -55,7 +64,7 @@ export async function GET(request: Request) {
 }
 
 export async function PATCH(request: Request) {
-  if (!await getCrewUser(request)) return unauthorized();
+  const user = await getCrewUser(request); if (!user) return unauthorized(); if (isCateringRole(user.role)) return forbidden("Catering accounts cannot verify cabin operations.");
   await ensureDatabase();
   const body = await request.json() as Record<string, unknown>;
   const database = getDatabase();
@@ -79,16 +88,21 @@ export async function PATCH(request: Request) {
   }
   const id = Number(body.id);
   if (!id) return Response.json({ error: "Item id is required" }, { status: 400 });
-  const fields = ["updated_at = ?"]; const values: Array<string | number> = [new Date().toISOString()];
-  if (typeof body.loaded === "number") { fields.push("loaded_count = ?"); values.push(Math.max(0, Math.round(body.loaded))); }
-  if (typeof body.checked === "boolean") { fields.push("checked = ?"); values.push(body.checked ? 1 : 0); }
-  await database.prepare(`UPDATE inventory_items SET ${fields.join(", ")} WHERE id = ?`).bind(...values, id).run();
-  const item = await database.prepare("SELECT id, flight_id AS flightId, category, name, location, required_count AS required, loaded_count AS loaded, unit, checked, updated_at AS updatedAt FROM inventory_items WHERE id = ?").bind(id).first();
+  if (typeof body.loaded === "number") return Response.json({ error: "Loaded quantities are managed by Catering." }, { status: 403 });
+  const existingItem = await database.prepare("SELECT flight_id AS flightId, workflow_status AS workflowStatus FROM inventory_items WHERE id = ?").bind(id).first<{ flightId: string; workflowStatus: string }>();
+  if (!existingItem) return Response.json({ error: "Item not found" }, { status: 404 });
+  if (typeof body.checked !== "boolean") return Response.json({ error: "Verification status is required" }, { status: 400 });
+  if (body.checked && !["submitted", "verified"].includes(existingItem.workflowStatus)) return Response.json({ error: "Catering must submit this manifest before cabin verification." }, { status: 409 });
+  const now = new Date().toISOString();
+  await database.prepare("UPDATE inventory_items SET checked = ?, crew_verified_by = ?, crew_verified_at = ?, updated_at = ? WHERE id = ?").bind(body.checked ? 1 : 0, body.checked ? user.fullName : "", body.checked ? now : null, now, id).run();
+  const pending = await database.prepare("SELECT COUNT(*) AS total FROM inventory_items WHERE flight_id = ? AND checked = 0").bind(existingItem.flightId).first<{ total: number }>();
+  await database.prepare("UPDATE inventory_items SET workflow_status = ? WHERE flight_id = ? AND workflow_status IN ('submitted', 'verified')").bind(pending?.total ? "submitted" : "verified", existingItem.flightId).run();
+  const item = await database.prepare("SELECT id, flight_id AS flightId, category, name, location, required_count AS required, loaded_count AS loaded, unit, checked, workflow_status AS workflowStatus, prepared_by AS preparedBy, submitted_at AS submittedAt, crew_verified_by AS crewVerifiedBy, crew_verified_at AS crewVerifiedAt, catering_notes AS cateringNotes, updated_at AS updatedAt FROM inventory_items WHERE id = ?").bind(id).first();
   return Response.json({ item });
 }
 
 export async function POST(request: Request) {
-  if (!await getCrewUser(request)) return unauthorized();
+  const user = await getCrewUser(request); if (!user) return unauthorized(); if (isCateringRole(user.role)) return forbidden("Catering accounts use the catering workspace.");
   await ensureDatabase();
   const body = await request.json() as Record<string, unknown>;
   const database = getDatabase();

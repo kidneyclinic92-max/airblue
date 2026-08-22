@@ -5,10 +5,10 @@ import { LogOut } from "lucide-react";
 type User = { fullName: string; employeeId: string; email: string; role: string; station: string };
 const CrewContext = createContext<User | null>(null);
 
-export function AuthGate({ children }: { children: React.ReactNode }) {
+export function AuthGate({ children, team = "crew" }: { children: React.ReactNode; team?: "crew" | "catering" }) {
   const [user, setUser] = useState<User | null>(null);
-  useEffect(() => { fetch("/api/auth/me").then(async (response) => { if (!response.ok) { const path = `${window.location.pathname}${window.location.search}`; window.location.replace(`/login?returnTo=${encodeURIComponent(path)}`); return; } setUser((await response.json()).user); }).catch(() => window.location.replace("/login")); }, []);
-  if (!user) return <div className="auth-loading"><span className="brand-mark">a</span><strong>Preparing crew workspace…</strong></div>;
+  useEffect(() => { fetch("/api/auth/me").then(async (response) => { if (!response.ok) { const path = `${window.location.pathname}${window.location.search}`; window.location.replace(`/login?returnTo=${encodeURIComponent(path)}`); return; } const nextUser = (await response.json()).user as User; const catering = nextUser.role.toLowerCase().includes("catering"); if (team === "catering" && !catering) return window.location.replace("/overview"); if (team === "crew" && catering) return window.location.replace("/catering"); setUser(nextUser); }).catch(() => window.location.replace("/login")); }, [team]);
+  if (!user) return <div className="auth-loading"><span className="brand-mark">a</span><strong>Preparing operations workspace…</strong></div>;
   return <CrewContext.Provider value={user}>{children}</CrewContext.Provider>;
 }
 
