@@ -22,7 +22,7 @@ az group create --name airblue-ops-rg --location uaenorth
 az deployment group create \
   --resource-group airblue-ops-rg \
   --template-file azure/app-service.bicep \
-  --parameters appName=<globally-unique-app-name>
+  --parameters appName=<globally-unique-app-name> rfidHashPepper=<strong-random-secret>
 ```
 
 ## Deploy from GitHub
@@ -40,8 +40,9 @@ App Service build automation installs dependencies and runs the build. Confirm t
 | `WEBSITE_NODE_DEFAULT_VERSION` | `~24` |
 | `SCM_DO_BUILD_DURING_DEPLOYMENT` | `true` |
 | `SQLITE_PATH` | `/home/data/airblue.sqlite` |
+| `RFID_HASH_PEPPER` | A long, private random value used to hash RFID card identifiers |
 
-Set the startup command to `npm start`, enable Always On, and configure `/api/health` as the health check path.
+Set the startup command to `npm start`, enable Always On, and configure `/api/health` as the health check path. Store `RFID_HASH_PEPPER` as an App Service secret or Key Vault reference and do not rotate it without re-enrolling crew cards.
 
 ## Preflight
 

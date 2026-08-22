@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 import { AuthGate, CrewProfile } from "./components/AuthGate";
 import { MobileNav } from "./components/MobileNav";
+import { RfidCardField } from "./components/RfidCardField";
 
 type Item = {
   id: number;
@@ -65,6 +66,8 @@ export default function Home() {
   const [notes, setNotes] = useState("Water bottles short by 8. Catering team notified at Gate 4.");
   const [toast, setToast] = useState("");
   const [saving, setSaving] = useState(false);
+  const [rfidCard, setRfidCard] = useState("");
+  const [rfidError, setRfidError] = useState("");
 
   useEffect(() => {
     fetch("/api/operations")
@@ -106,19 +109,22 @@ export default function Home() {
   }
 
   async function sendHandover() {
-    setSaving(true);
+    setSaving(true); setRfidError("");
     try {
-      await fetch("/api/operations", {
+      const challengeResponse = await fetch("/api/rfid", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "challenge", purpose: "send" }) });
+      const challengeData = await challengeResponse.json(); if (!challengeResponse.ok) throw new Error(challengeData.error ?? "Unable to start RFID signature.");
+      const response = await fetch("/api/operations", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ notes, toCrew: "Ayesha Malik", toFlightNo: "PA207", toRoute: "KHI → DXB" }),
+        body: JSON.stringify({ notes, toCrew: "Ayesha Malik", toFlightNo: "PA207", toRoute: "KHI → DXB", rfidCard, rfidChallenge: challengeData.challenge.id }),
       });
-    } finally {
+      const data = await response.json(); if (!response.ok) throw new Error(data.error ?? "RFID signature failed.");
       setSaving(false);
       setHandoverOpen(false);
+      setRfidCard("");
       setToast("Handover sent to Ayesha Malik · PA207");
       window.setTimeout(() => setToast(""), 4200);
-    }
+    } catch (caught) { setSaving(false); setRfidError(caught instanceof Error ? caught.message : "RFID signature failed."); }
   }
 
   async function saveDraft() {
@@ -268,8 +274,10 @@ export default function Home() {
             <div><Clock3 size={17} /><span>Snapshot at <strong>10:38</strong></span></div>
           </div>
           <label className="notes-label">Operational notes <span>Required for open issues</span><textarea value={notes} onChange={(event) => setNotes(event.target.value)} rows={4} /></label>
+          <RfidCardField value={rfidCard} onChange={setRfidCard} disabled={saving} />
+          {rfidError && <div className="auth-error">{rfidError}</div>}
           <label className="confirmation"><input type="checkbox" defaultChecked /><span>I confirm this handover reflects the latest cabin and catering status.</span></label>
-          <div className="modal-actions"><button className="ghost-button" onClick={saveDraft}>Save draft</button><button className="primary-button" onClick={sendHandover} disabled={saving}>{saving ? "Sending…" : "Send & notify incoming crew"} <ArrowRight size={17} /></button></div>
+          <div className="modal-actions"><button className="ghost-button" onClick={saveDraft}>Save draft</button><button className="primary-button" onClick={sendHandover} disabled={saving || rfidCard.trim().length < 6}>{saving ? "Validating signature…" : "Sign & send handover"} <ArrowRight size={17} /></button></div>
         </section>
       </div>}
 

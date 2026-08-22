@@ -31,6 +31,18 @@ export const handovers = sqliteTable("handovers", {
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 }, (table) => [index("idx_handovers_from_flight_id").on(table.fromFlightId)]);
 
+export const rfidCredentials = sqliteTable("rfid_credentials", {
+  id: integer("id").primaryKey({ autoIncrement: true }), userId: integer("user_id").notNull(), cardHash: text("card_hash").notNull(), cardFingerprint: text("card_fingerprint").notNull(), active: integer("active", { mode: "boolean" }).notNull().default(true), enrolledAt: text("enrolled_at").notNull().default(sql`CURRENT_TIMESTAMP`), lastUsedAt: text("last_used_at"),
+}, (table) => [uniqueIndex("idx_rfid_credentials_card_hash").on(table.cardHash), index("idx_rfid_credentials_user_active").on(table.userId, table.active)]);
+
+export const rfidChallenges = sqliteTable("rfid_challenges", {
+  id: text("id").primaryKey(), userId: integer("user_id").notNull(), purpose: text("purpose").notNull(), expiresAt: text("expires_at").notNull(), usedAt: text("used_at"), createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [index("idx_rfid_challenges_user_expiry").on(table.userId, table.expiresAt)]);
+
+export const handoverSignatures = sqliteTable("handover_signatures", {
+  id: integer("id").primaryKey({ autoIncrement: true }), handoverId: integer("handover_id").notNull(), userId: integer("user_id").notNull(), signerName: text("signer_name").notNull(), employeeId: text("employee_id").notNull(), purpose: text("purpose").notNull(), cardFingerprint: text("card_fingerprint").notNull(), signatureHash: text("signature_hash").notNull(), validationStatus: text("validation_status").notNull().default("valid"), signedAt: text("signed_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [uniqueIndex("idx_handover_signatures_handover_purpose").on(table.handoverId, table.purpose), index("idx_handover_signatures_user_id").on(table.userId)]);
+
 export const flights = sqliteTable("flights", {
   flightNo: text("flight_no").primaryKey(),
   flightDate: text("flight_date").notNull(),

@@ -1,5 +1,6 @@
 import { getDatabase } from "../../../db";
 import { forbidden, getCrewUser, isCateringRole, unauthorized } from "../../../db/auth";
+import { ensureRfidDatabase, validateAndSignHandover } from "../../../db/rfid";
 
 const seedItems = [
   ["Catering", "Hot meal trays", "FWD galley", 126, 126, "trays", 1], ["Catering", "Water bottles", "FWD + AFT", 192, 184, "bottles", 0],
@@ -16,6 +17,17 @@ const seedFlights = [
   ["PA217", "2026-08-16", "ISB", "DXB", "18:45", "Airbus A320", "AP-EDB", "08", 136, "scheduled", 0, "Usman Tariq"],
   ["PA401", "2026-08-16", "LHE", "KHI", "20:05", "Airbus A320", "AP-EDC", "17", 149, "delayed", 4, "Noor Fatima"],
 ] as const;
+
+const handoverSelect = `SELECT h.id, h.from_flight_id AS fromFlightId, h.to_flight_no AS toFlightNo, h.to_route AS toRoute, h.to_crew AS toCrew, h.notes, h.status, h.created_at AS createdAt,
+  (SELECT signer_name FROM handover_signatures WHERE handover_id = h.id AND purpose = 'send') AS sentSigner,
+  (SELECT employee_id FROM handover_signatures WHERE handover_id = h.id AND purpose = 'send') AS sentEmployeeId,
+  (SELECT card_fingerprint FROM handover_signatures WHERE handover_id = h.id AND purpose = 'send') AS sentCardFingerprint,
+  (SELECT signed_at FROM handover_signatures WHERE handover_id = h.id AND purpose = 'send') AS sentSignedAt,
+  (SELECT signer_name FROM handover_signatures WHERE handover_id = h.id AND purpose = 'acknowledge') AS acknowledgedSigner,
+  (SELECT employee_id FROM handover_signatures WHERE handover_id = h.id AND purpose = 'acknowledge') AS acknowledgedEmployeeId,
+  (SELECT card_fingerprint FROM handover_signatures WHERE handover_id = h.id AND purpose = 'acknowledge') AS acknowledgedCardFingerprint,
+  (SELECT signed_at FROM handover_signatures WHERE handover_id = h.id AND purpose = 'acknowledge') AS acknowledgedSignedAt
+  FROM handovers h`;
 
 export async function ensureDatabase() {
   const d1 = getDatabase();
@@ -48,6 +60,7 @@ export async function ensureDatabase() {
     d1.prepare("INSERT INTO handovers (from_flight_id, to_flight_no, to_route, to_crew, notes, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)").bind("PA199", "PA201", "KHI → ISB", "Sana Khan", "Cabin secure. Two vegetarian meals transferred to FWD chiller.", "acknowledged", "2026-08-16T08:45:00Z"),
     d1.prepare("INSERT INTO handovers (from_flight_id, to_flight_no, to_route, to_crew, notes, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)").bind("PA203", "PA205", "KHI → ISB", "Hina Raza", "Awaiting final catering uplift confirmation.", "sent", "2026-08-16T10:12:00Z"),
   ]);
+  await ensureRfidDatabase();
   await d1.prepare("PRAGMA optimize").run();
 }
 
@@ -58,7 +71,7 @@ export async function GET(request: Request) {
   const [items, allFlights, recentHandovers] = await Promise.all([
     database.prepare("SELECT id, flight_id AS flightId, category, name, location, required_count AS required, loaded_count AS loaded, unit, checked, workflow_status AS workflowStatus, prepared_by AS preparedBy, submitted_at AS submittedAt, crew_verified_by AS crewVerifiedBy, crew_verified_at AS crewVerifiedAt, catering_notes AS cateringNotes, updated_at AS updatedAt FROM inventory_items WHERE flight_id = ? ORDER BY id").bind("PA201").all(),
     database.prepare("SELECT flight_no AS flightNo, flight_date AS flightDate, origin, destination, departure, aircraft, registration, gate, passengers, status, readiness, supervisor, updated_at AS updatedAt FROM flights ORDER BY flight_date, departure").all(),
-    database.prepare("SELECT id, from_flight_id AS fromFlightId, to_flight_no AS toFlightNo, to_route AS toRoute, to_crew AS toCrew, notes, status, created_at AS createdAt FROM handovers ORDER BY created_at DESC LIMIT 50").all(),
+    database.prepare(`${handoverSelect} ORDER BY h.created_at DESC LIMIT 50`).all(),
   ]);
   return Response.json({ items: items.results, flights: allFlights.results, recentHandovers: recentHandovers.results });
 }
@@ -82,8 +95,15 @@ export async function PATCH(request: Request) {
   if (body.entity === "handover") {
     const id = Number(body.id);
     if (!id) return Response.json({ error: "Handover id is required" }, { status: 400 });
-    await database.prepare("UPDATE handovers SET status = ? WHERE id = ?").bind(String(body.status ?? "acknowledged"), id).run();
-    const handover = await database.prepare("SELECT id, from_flight_id AS fromFlightId, to_flight_no AS toFlightNo, to_route AS toRoute, to_crew AS toCrew, notes, status, created_at AS createdAt FROM handovers WHERE id = ?").bind(id).first();
+    const current = await database.prepare("SELECT id, from_flight_id AS fromFlightId, to_flight_no AS toFlightNo, to_route AS toRoute, to_crew AS toCrew, notes, status, created_at AS createdAt FROM handovers WHERE id = ?").bind(id).first<{ id: number; fromFlightId: string; toFlightNo: string; toRoute: string; toCrew: string; notes: string; status: string; createdAt: string }>();
+    if (!current) return Response.json({ error: "Handover not found" }, { status: 404 });
+    if (current.status !== "sent") return Response.json({ error: "Only a sent handover can be acknowledged." }, { status: 409 });
+    if (current.toCrew.trim().toLowerCase() !== user.fullName.trim().toLowerCase()) return Response.json({ error: `This handover is assigned to ${current.toCrew}.` }, { status: 403 });
+    try {
+      await validateAndSignHandover({ user, handoverId: id, purpose: "acknowledge", challengeId: String(body.rfidChallenge ?? ""), cardUid: String(body.rfidCard ?? ""), snapshot: JSON.stringify(current) });
+    } catch (error) { return Response.json({ error: error instanceof Error ? error.message : "RFID validation failed." }, { status: 400 }); }
+    await database.prepare("UPDATE handovers SET status = 'acknowledged' WHERE id = ?").bind(id).run();
+    const handover = await database.prepare(`${handoverSelect} WHERE h.id = ?`).bind(id).first();
     return Response.json({ handover });
   }
   const id = Number(body.id);
@@ -119,7 +139,15 @@ export async function POST(request: Request) {
   }
   if (!body.toCrew || !body.toFlightNo) return Response.json({ error: "Incoming crew and flight are required" }, { status: 400 });
   const requestedStatus = body.status === "draft" ? "draft" : "sent";
-  const result = await database.prepare("INSERT INTO handovers (from_flight_id, to_flight_no, to_route, to_crew, notes, status) VALUES (?, ?, ?, ?, ?, ?)").bind(String(body.fromFlightId ?? "PA201"), String(body.toFlightNo), String(body.toRoute ?? ""), String(body.toCrew), String(body.notes ?? "").trim(), requestedStatus).run();
-  const handover = await database.prepare("SELECT id, from_flight_id AS fromFlightId, to_flight_no AS toFlightNo, to_route AS toRoute, to_crew AS toCrew, notes, status, created_at AS createdAt FROM handovers WHERE id = ?").bind(result.meta.last_row_id).first();
+  const values = { fromFlightId: String(body.fromFlightId ?? "PA201"), toFlightNo: String(body.toFlightNo), toRoute: String(body.toRoute ?? ""), toCrew: String(body.toCrew), notes: String(body.notes ?? "").trim() };
+  const result = await database.prepare("INSERT INTO handovers (from_flight_id, to_flight_no, to_route, to_crew, notes, status) VALUES (?, ?, ?, ?, ?, ?)").bind(values.fromFlightId, values.toFlightNo, values.toRoute, values.toCrew, values.notes, requestedStatus === "sent" ? "pending_signature" : "draft").run();
+  const handoverId = Number(result.meta.last_row_id);
+  if (requestedStatus === "sent") {
+    try {
+      await validateAndSignHandover({ user, handoverId, purpose: "send", challengeId: String(body.rfidChallenge ?? ""), cardUid: String(body.rfidCard ?? ""), snapshot: JSON.stringify(values) });
+      await database.prepare("UPDATE handovers SET status = 'sent' WHERE id = ?").bind(handoverId).run();
+    } catch (error) { await database.prepare("DELETE FROM handovers WHERE id = ? AND status = 'pending_signature'").bind(handoverId).run(); return Response.json({ error: error instanceof Error ? error.message : "RFID validation failed." }, { status: 400 }); }
+  }
+  const handover = await database.prepare(`${handoverSelect} WHERE h.id = ?`).bind(handoverId).first();
   return Response.json({ handover }, { status: 201 });
 }

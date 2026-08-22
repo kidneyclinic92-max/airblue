@@ -1,6 +1,8 @@
 param appName string
 param location string = resourceGroup().location
 param skuName string = 'B1'
+@secure()
+param rfidHashPepper string
 
 resource plan 'Microsoft.Web/serverfarms@2024-04-01' = {
   name: '${appName}-plan'
@@ -45,6 +47,10 @@ resource app 'Microsoft.Web/sites@2024-04-01' = {
         {
           name: 'SQLITE_PATH'
           value: '/home/data/airblue.sqlite'
+        }
+        {
+          name: 'RFID_HASH_PEPPER'
+          value: rfidHashPepper
         }
       ]
     }

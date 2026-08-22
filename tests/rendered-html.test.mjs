@@ -75,3 +75,24 @@ test("supports separate catering preparation and cabin verification workflows", 
   assert.match(operations, /Loaded quantities are managed by Catering/);
   assert.match(operations, /Catering must submit this manifest before cabin verification/);
 });
+
+test("adds validated RFID signatures to crew handovers", async () => {
+  const [schema, rfid, rfidApi, operations, handovers, guide] = await Promise.all([
+    readFile(new URL("../db/schema.ts", import.meta.url), "utf8"),
+    readFile(new URL("../db/rfid.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/rfid/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/operations/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/components/OperationsPage.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../AZURE_APP_SERVICE.md", import.meta.url), "utf8"),
+  ]);
+  for (const table of ["rfid_credentials", "rfid_challenges", "handover_signatures"]) assert.match(schema, new RegExp(table));
+  assert.match(rfid, /SHA-256/);
+  assert.match(rfid, /expiresAt = new Date\(Date\.now\(\) \+ 2 \* 60 \* 1000\)/);
+  assert.match(rfid, /used_at IS NULL/);
+  assert.match(rfidApi, /Only|RFID handover signing/);
+  assert.match(operations, /RFID card does not match|validateAndSignHandover/);
+  assert.match(operations, /This handover is assigned to/);
+  assert.match(handovers, /Sign & acknowledge/);
+  assert.match(handovers, /RFID signed/);
+  assert.match(guide, /RFID_HASH_PEPPER/);
+});
