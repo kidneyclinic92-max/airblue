@@ -41,12 +41,15 @@ test("includes crew planning, department handovers and ACDL persistence", async 
 });
 
 test("ships mobile navigation and Azure App Service prerequisites", async () => {
-  const [mobileNav, styles, database, bicep, guide] = await Promise.all([
+  const [mobileNav, styles, database, bicep, guide, packageJson, workflow, nextConfig] = await Promise.all([
     readFile(new URL("../app/components/MobileNav.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
     readFile(new URL("../db/index.ts", import.meta.url), "utf8"),
     readFile(new URL("../azure/app-service.bicep", import.meta.url), "utf8"),
     readFile(new URL("../AZURE_APP_SERVICE.md", import.meta.url), "utf8"),
+    readFile(new URL("../package.json", import.meta.url), "utf8"),
+    readFile(new URL("../.github/workflows/main_flight101.yml", import.meta.url), "utf8"),
+    readFile(new URL("../next.config.ts", import.meta.url), "utf8"),
   ]);
   assert.match(mobileNav, /mobile-bottom-nav/);
   assert.match(styles, /safe-area-inset-bottom/);
@@ -55,6 +58,11 @@ test("ships mobile navigation and Azure App Service prerequisites", async () => 
   assert.match(bicep, /NODE\|24-lts/);
   assert.match(bicep, /\/home\/data\/airblue\.sqlite/);
   assert.match(guide, /Basic B1/);
+  assert.match(packageJson, /node dist\/standalone\/server\.js/);
+  assert.match(workflow, /npm ci/);
+  assert.match(workflow, /npm run build/);
+  assert.match(workflow, /^\s+dist$/m);
+  assert.match(nextConfig, /output:\s*"standalone"/);
 });
 
 test("supports separate catering preparation and cabin verification workflows", async () => {
